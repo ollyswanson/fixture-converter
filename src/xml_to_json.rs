@@ -3,25 +3,26 @@ use std::collections::HashMap;
 use std::io::Read;
 
 use anyhow::anyhow;
+use rust_stemmers::Stemmer;
 use serde_json::{Map, Value};
 use xmltree::{Element, XMLNode};
 
 /// Configuration for parsing XML to JSON.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct Config {
     /// Exclude attributes such as `schemaLocation` from outputted JSON.
     pub ignore_attributes: Vec<String>,
     /// XML such as <groups><group /></groups> is converted to { "groups": { "group": [...] } }
-    /// even when there is a a single child <group /> in the XML, when `try_detect_lists: true` we
-    /// use the plural form, e.g. "groups" and the singular form "group" and assume that although
-    /// we have a single child, the correct conversion would be to a list.
-    pub try_detect_lists: bool,
+    /// even when there is a a single child <group /> in the XML. When `Stemmer` is present we make
+    /// use of stemming to try and detect if a child is the singular form of its parent, and is
+    /// therefore likely to be represented as a list in JSON.
+    pub stemmer: Option<Stemmer>,
 }
 
 pub fn parse_xml<T: Read>(input: &mut T, config: &Config) -> anyhow::Result<Value> {
     let element = Element::parse(input)?;
 
-    let (name, value) = convert_node(XMLNode::Element(element), &config)
+    let (name, value) = convert_node(XMLNode::Element(element), config)
         .ok_or_else(|| anyhow!("No XML node found"))?;
 
     let mut map = Map::new();
@@ -73,8 +74,11 @@ fn convert_children(
 
     for child in children {
         if let Some((name, value)) = convert_node(child, config) {
-            let maybe_list_element = parent_name.ends_with('s')
-                && &parent_name[..parent_name.len() - 1] == name.as_str();
+            let maybe_list_element = if let Some(stemmer) = &config.stemmer {
+                stemmer.stem(&name) == stemmer.stem(parent_name)
+            } else {
+                false
+            };
 
             match map.entry(name) {
                 Entry::Occupied(mut e) => {
@@ -94,7 +98,7 @@ fn convert_children(
                     }
                 }
                 Entry::Vacant(e) => {
-                    if config.try_detect_lists && maybe_list_element {
+                    if maybe_list_element {
                         e.insert(Value::Array(vec![value]));
                     } else {
                         e.insert(value);

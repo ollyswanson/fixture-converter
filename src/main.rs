@@ -5,6 +5,7 @@ use std::fs::{read_dir, File};
 use std::io::BufReader;
 
 use anyhow::Context;
+use rust_stemmers::{Algorithm, Stemmer};
 
 use cli::get_args;
 use xml_to_json::{parse_xml, Config};
@@ -13,7 +14,7 @@ fn main() -> anyhow::Result<()> {
     let cli = get_args();
     let input_directory = read_dir(&cli.input)?;
     let config = Config {
-        try_detect_lists: true,
+        stemmer: Some(Stemmer::create(Algorithm::English)),
         ignore_attributes: vec!["schemaLocation".to_owned()],
     };
 
